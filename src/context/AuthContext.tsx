@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, User as FirebaseUser, updateProfile as updateFirebaseProfile } from 'firebase/auth';
 import {
   auth,
   loginWithGoogle,
@@ -213,10 +213,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       }
 
-      if (profile.role === 'student') {
-        enrollStudentInDefaultClassrooms(profile.id).catch(console.warn);
-      }
-
       setCurrentUser(profile);
       localStorage.setItem('eduvibe_current_user', JSON.stringify(profile));
     } finally {
@@ -293,24 +289,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       await saveUserProfile(newProfile);
 
-      if (role === 'teacher') {
-        // Automatically create initial classroom for this teacher in Firestore
-        const classCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const teacherClassroom: Classroom = {
-          id: `cls_${newProfile.id}`,
-          name: `ห้องเรียน ${newProfile.name} (${newProfile.subject || 'กลุ่มสาระการเรียนรู้'})`,
-          subject: newProfile.subject || 'วิชาทั่วไป',
-          code: classCode,
-          teacherId: newProfile.id,
-          teacherName: newProfile.name,
-          description: `ห้องเรียนออนไลน์วิชา${newProfile.subject || 'ทั่วไป'} โดยคุณครู${newProfile.name}`,
-          color: 'from-blue-600 to-indigo-700',
-          studentIds: [],
-          schedule: 'จันทร์ 09:00 - 11:00 น.',
-          createdAt: new Date().toISOString(),
-        };
-        await createClassroom(teacherClassroom);
-      }
+      // New users start completely clean with zero classrooms.
+      // Teachers create their classrooms on demand, and students join using their room code.
 
       setCurrentUser(newProfile);
       localStorage.setItem('eduvibe_current_user', JSON.stringify(newProfile));
@@ -348,26 +328,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           createdAt: new Date().toISOString(),
         };
         await saveUserProfile(profile);
-
-        if (roleToUse === 'teacher') {
-          const classCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-          const teacherClassroom: Classroom = {
-            id: `cls_${profile.id}`,
-            name: `ห้องเรียน ${profile.name}`,
-            subject: 'วิชาทั่วไป',
-            code: classCode,
-            teacherId: profile.id,
-            teacherName: profile.name,
-            description: `ห้องเรียนออนไลน์โดย ${profile.name}`,
-            color: 'from-blue-600 to-indigo-700',
-            studentIds: ['std_65001', 'std_65002', 'std_65003', 'std_65004', 'std_65005'],
-            schedule: 'ตามตารางสอน',
-            createdAt: new Date().toISOString(),
-          };
-          await createClassroom(teacherClassroom);
-        } else {
-          await enrollStudentInDefaultClassrooms(profile.id);
-        }
       }
       setCurrentUser(profile);
       localStorage.setItem('eduvibe_current_user', JSON.stringify(profile));
@@ -440,6 +400,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = { ...currentUser, ...data };
     setCurrentUser(updated);
     localStorage.setItem('eduvibe_current_user', JSON.stringify(updated));
+
+    // Update Firebase Auth user if available
+    try {
+      if (auth.currentUser) {
+        await updateFirebaseProfile(auth.currentUser, {
+          displayName: data.name !== undefined ? data.name : auth.currentUser.displayName,
+          photoURL: data.avatar !== undefined ? data.avatar : auth.currentUser.photoURL,
+        });
+      }
+    } catch (fbErr) {
+      console.warn('Firebase Auth update profile warning:', fbErr);
+    }
+
     await saveUserProfile(updated);
   };
 

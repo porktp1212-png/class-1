@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { Classroom, Assignment, Submission, UserProfile, Certificate } from '../../types';
+import type { Classroom, Assignment, Submission, UserProfile } from '../../types';
 import { joinClassroomByCode } from '../../services/firestoreService';
 import {
   Sparkles,
@@ -15,28 +15,32 @@ import {
   ArrowRight,
   PlusCircle,
   Check,
+  User,
+  Edit,
 } from 'lucide-react';
 
 interface StudentDashboardProps {
   classroom: Classroom | null;
+  classrooms?: Classroom[];
   assignments: Assignment[];
   submissions: Submission[];
   student: UserProfile;
-  certificates: Certificate[];
   onNavigateTab: (tab: string) => void;
   onSelectAssignmentToSubmit: (asg: Assignment) => void;
   onClassroomJoined?: (classroom: Classroom) => void;
+  onOpenEditProfile?: () => void;
 }
 
 export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   classroom,
+  classrooms = [],
   assignments,
   submissions,
   student,
-  certificates,
   onNavigateTab,
   onSelectAssignmentToSubmit,
   onClassroomJoined,
+  onOpenEditProfile,
 }) => {
   const [joinCode, setJoinCode] = useState('');
   const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
@@ -111,12 +115,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const pendingAssignments = assignments.filter((a) => !studentSubmissionsMap.has(a.id));
   const gradedSubmissions = submissions.filter((s) => s.studentId === student.id && s.status === 'graded');
 
-  // Schedule mock for today & this week
-  const classSchedule = [
-    { time: '08:30 - 10:10 น.', subject: 'วิทยาศาสตร์และเทคโนโลยี', room: 'ห้องปฏิบัติการ 402', teacher: 'ครูสมชาย ใจดี', status: 'กำลังเรียน' },
-    { time: '10:20 - 11:10 น.', subject: 'คณิตศาสตร์เพิ่มเติม', room: 'ห้อง 301', teacher: 'ครูสุวรรณา', status: 'คาบถัดไป' },
-    { time: '13:00 - 14:40 น.', subject: 'ภาษาอังกฤษเพื่อการสื่อสาร', room: 'ห้อง Sound Lab', teacher: 'Teacher David', status: 'ช่วงบ่าย' },
-  ];
+  // Only registered classrooms where student actually belongs
+  const registeredClassrooms = classrooms.filter(
+    (c) => c && Array.isArray(c.studentIds) && c.studentIds.includes(student.id)
+  );
+
+  // If classrooms array was not passed or only activeClassroom is present and verified
+  const coursesToDisplay = registeredClassrooms.length > 0
+    ? registeredClassrooms
+    : (classroom && classroom.studentIds?.includes(student.id) ? [classroom] : []);
 
   return (
     <div className="space-y-6">
@@ -124,11 +131,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-teal-600 via-emerald-600 to-cyan-600 p-6 sm:p-8 text-white shadow-xl shadow-teal-500/10">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
           <div className="flex items-center gap-4">
-            <img
-              src={student.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-              alt={student.name}
-              className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover border-2 border-white/60 shadow-lg"
-            />
+            <div className="relative group cursor-pointer" onClick={onOpenEditProfile}>
+              <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white/20 backdrop-blur-md border-2 border-white/60 shadow-lg flex items-center justify-center text-white group-hover:bg-white/30 transition-all">
+                <User className="w-8 h-8 sm:w-10 sm:h-10 text-white" />
+              </div>
+              <div
+                className="absolute -bottom-1 -right-1 p-1.5 bg-white text-teal-700 rounded-lg shadow-md hover:bg-teal-50 transition-colors"
+                title="คลิกเพื่อแก้ไขข้อมูลโปรไฟล์"
+              >
+                <Edit className="w-3.5 h-3.5" />
+              </div>
+            </div>
+
             <div className="space-y-1">
               <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-white/20 text-xs font-semibold">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300" />
@@ -136,7 +150,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight">สวัสดี, {student.name}</h1>
               <p className="text-xs sm:text-sm text-teal-100">
-                ยินดีต้อนรับสู่ห้องเรียน {classroom.name} (ครูผู้สอน: {classroom.teacherName})
+                {classroom ? `ห้องเรียนปัจจุบัน: ${classroom.name} (ครู: ${classroom.teacherName})` : `ลงทะเบียนแล้ว ${coursesToDisplay.length} วิชา`}
               </p>
             </div>
           </div>
@@ -146,7 +160,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
             <div className="p-3.5 rounded-2xl bg-white/15 backdrop-blur-md border border-white/20 text-center min-w-[90px]">
               <div className="flex items-center justify-center gap-1 text-amber-300">
                 <Sparkles className="w-4 h-4" />
-                <span className="text-xl font-black text-white">{student.totalPoints}</span>
+                <span className="text-xl font-black text-white">{student.totalPoints || 0}</span>
               </div>
               <span className="text-[10px] text-teal-100 uppercase tracking-wider font-semibold">แต้มสะสม</span>
             </div>
@@ -161,12 +175,12 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
             <button
               type="button"
-              id="btn-nav-to-certs"
-              onClick={() => onNavigateTab('certificates')}
+              id="btn-nav-to-points"
+              onClick={() => onNavigateTab('points')}
               className="p-3.5 rounded-2xl bg-amber-400 hover:bg-amber-300 text-slate-900 font-bold text-xs shadow-md transition-all flex flex-col items-center justify-center min-w-[90px]"
             >
-              <Award className="w-5 h-5 mb-0.5" />
-              <span>เกียรติบัตร</span>
+              <Sparkles className="w-5 h-5 mb-0.5 text-slate-900" />
+              <span>ระบบสะสมแต้ม</span>
             </button>
           </div>
         </div>
@@ -217,47 +231,57 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
       {/* Main Grid: Schedule & Grades */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Timetable & Schedule (ตารางเรียนแบบเรียลไทม์) */}
+        {/* Left 2 Cols: Timetable strictly based on registered courses */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <div className="p-1.5 rounded-lg bg-teal-100 text-teal-700">
                 <Calendar className="w-4 h-4" />
               </div>
-              <h2 className="text-base font-bold text-slate-900">ตารางเรียนและตารางสอนวันนี้</h2>
+              <div>
+                <h2 className="text-base font-bold text-slate-900">ตารางเรียนรายวิชาที่ลงทะเบียน</h2>
+                <p className="text-[11px] text-slate-500">แสดงเฉพาะรายวิชาที่นักเรียนลงทะเบียนจริงในระบบเท่านั้น</p>
+              </div>
             </div>
-            <span className="text-xs text-slate-500 font-medium">วัน{new Date().toLocaleDateString('th-TH', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+            <span className="text-xs text-slate-500 font-medium">
+              {coursesToDisplay.length} วิชาที่ลงทะเบียน
+            </span>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 shadow-xs overflow-hidden">
-            {classSchedule.map((item, idx) => (
-              <div key={idx} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
-                <div className="flex items-center gap-3">
-                  <div className="px-3 py-1.5 rounded-xl bg-slate-100 text-slate-700 font-mono font-bold text-xs text-center min-w-[110px]">
-                    {item.time}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-xs text-slate-900">{item.subject}</h4>
-                    <div className="text-[11px] text-slate-500">
-                      {item.room} • {item.teacher}
+          {coursesToDisplay.length === 0 ? (
+            <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
+              <BookOpen className="w-10 h-10 text-slate-300 mx-auto" />
+              <div className="text-sm font-bold text-slate-700">ยังไม่มีรายวิชาที่ลงทะเบียนในระบบ</div>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                ตารางเรียนจะแสดงตามรายวิชาที่นักเรียนลงทะเบียนจริงเท่านั้น กรุณาใช้รหัสห้อง 6 หลักเพื่อเข้าร่วมวิชาเรียน
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 divide-y divide-slate-100 shadow-xs overflow-hidden">
+              {coursesToDisplay.map((course) => (
+                <div key={course.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="px-3 py-2 rounded-xl bg-teal-50 text-teal-800 font-mono font-bold text-xs text-center min-w-[120px] border border-teal-100">
+                      {course.schedule || 'ตามตารางสอน'}
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                        <span>{course.name}</span>
+                        {course.subject && <span className="text-slate-400 font-normal">({course.subject})</span>}
+                      </h4>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        ครูผู้สอน: {course.teacherName} • รหัสวิชา: {course.code}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <span
-                  className={`px-3 py-1 rounded-full text-[10px] font-bold self-start sm:self-auto ${
-                    item.status === 'กำลังเรียน'
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : item.status === 'คาบถัดไป'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  {item.status}
-                </span>
-              </div>
-            ))}
-          </div>
+                  <span className="px-3 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 self-start sm:self-auto">
+                    ลงทะเบียนแล้ว
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Recent Graded Work Section */}
           <div className="pt-2 space-y-3">
@@ -371,19 +395,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                 <div className="flex items-center gap-2.5">
                   <BookOpen className="w-4 h-4 text-teal-600" />
                   <span className="font-semibold text-slate-800">คลังบทเรียนและวิดีโอ</span>
-                </div>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              <button
-                type="button"
-                id="btn-student-quick-quiz"
-                onClick={() => onNavigateTab('quizzes')}
-                className="w-full p-3 rounded-xl border border-slate-200 hover:border-purple-500 hover:bg-purple-50/50 flex items-center justify-between text-left transition-all"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Sparkles className="w-4 h-4 text-purple-600" />
-                  <span className="font-semibold text-slate-800">ทำแบบทดสอบเก็บคะแนน</span>
                 </div>
                 <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
               </button>

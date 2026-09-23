@@ -25,7 +25,33 @@ import type {
   ChatMessage,
   Certificate,
   UserProfile,
+  RubricScoreItem,
+  AttachedFile,
 } from '../types';
+
+/**
+ * Recursively strips undefined values from an object or array so Firestore setDoc / updateDoc never fails.
+ */
+export function sanitizeForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return null as any;
+  }
+  if (Array.isArray(data)) {
+    return data
+      .filter((item) => item !== undefined)
+      .map((item) => sanitizeForFirestore(item)) as any;
+  }
+  if (typeof data === 'object') {
+    const cleaned: Record<string, any> = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (val !== undefined) {
+        cleaned[key] = sanitizeForFirestore(val);
+      }
+    }
+    return cleaned as any;
+  }
+  return data;
+}
 
 // ================= USER PROFILE =================
 export async function saveUserProfile(user: UserProfile): Promise<void> {
@@ -35,12 +61,14 @@ export async function saveUserProfile(user: UserProfile): Promise<void> {
     email: cleanEmail,
   };
 
+  const sanitized = sanitizeForFirestore({
+    ...normalizedUser,
+    updatedAt: new Date().toISOString(),
+  });
+
   const path = `users/${user.id}`;
   try {
-    await setDoc(doc(db, 'users', user.id), {
-      ...normalizedUser,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    await setDoc(doc(db, 'users', user.id), sanitized, { merge: true });
   } catch (error) {
     console.warn('saveUserProfile Firestore notice:', error);
   }
@@ -56,6 +84,15 @@ export async function saveUserProfile(user: UserProfile): Promise<void> {
       localList.push(normalizedUser);
     }
     localStorage.setItem('eduvibe_registered_users', JSON.stringify(localList));
+
+    // Also update current active user if matching
+    const curRaw = localStorage.getItem('eduvibe_current_user');
+    if (curRaw) {
+      const cur = JSON.parse(curRaw);
+      if (cur && (cur.id === user.id || cur.email?.toLowerCase() === cleanEmail)) {
+        localStorage.setItem('eduvibe_current_user', JSON.stringify({ ...cur, ...normalizedUser }));
+      }
+    }
   } catch {
     // ignore
   }
@@ -318,20 +355,7 @@ export async function addStudentToClassroom(classroomId: string, studentId: stri
 }
 
 export async function enrollStudentInDefaultClassrooms(studentId: string): Promise<void> {
-  try {
-    const snap = await getDocs(collection(db, 'classrooms'));
-    for (const docSnap of snap.docs) {
-      const data = docSnap.data() as Classroom;
-      const current = data.studentIds || [];
-      if (!current.includes(studentId)) {
-        await updateDoc(doc(db, 'classrooms', docSnap.id), {
-          studentIds: [...current, studentId],
-        });
-      }
-    }
-  } catch (error) {
-    console.warn('enrollStudentInDefaultClassrooms notice:', error);
-  }
+  // Empty intentionally: new students must not be auto-enrolled in classrooms
 }
 
 export async function getClassroomStudents(studentIds: string[]): Promise<UserProfile[]> {
@@ -342,13 +366,28 @@ export async function getClassroomStudents(studentIds: string[]): Promise<UserPr
     return [];
   }
 
-  // 1. Check local registered cache first
+  // 1. Fetch from Firestore users collection for real registered accounts
+  for (const id of studentIds) {
+    if (!id || id === 'undefined') continue;
+    try {
+      const profile = await getUserProfile(id);
+      if (profile && profile.id && profile.name && !foundMap.has(profile.id)) {
+        result.push(profile);
+        foundMap.add(profile.id);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Check local registered cache for real registered users if not found in Firestore
   try {
     const rawList = JSON.parse(localStorage.getItem('eduvibe_registered_users') || '[]');
     const localList: UserProfile[] = Array.isArray(rawList) ? rawList.filter((u): u is UserProfile => Boolean(u && u.id)) : [];
     for (const id of studentIds) {
-      const found = localList.find((u) => u && u.id === id);
-      if (found && found.id && !foundMap.has(found.id)) {
+      if (!id || foundMap.has(id)) continue;
+      const found = localList.find((u) => u && (u.id === id || u.studentId === id));
+      if (found && found.id && found.name && !foundMap.has(found.id)) {
         result.push(found);
         foundMap.add(found.id);
       }
@@ -357,21 +396,7 @@ export async function getClassroomStudents(studentIds: string[]): Promise<UserPr
     // ignore
   }
 
-  // 2. Fetch from Firestore users collection
-  for (const id of studentIds) {
-    if (!foundMap.has(id)) {
-      try {
-        const profile = await getUserProfile(id);
-        if (profile && profile.id) {
-          result.push(profile);
-          foundMap.add(profile.id);
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
+  // Strictly return only real, verified registered students (do not generate fake/synthetic dummy profiles)
   return result;
 }
 
@@ -493,7 +518,8 @@ export function subscribeLessons(classroomId: string, callback: (lessons: Lesson
 export async function saveLesson(lesson: Lesson): Promise<void> {
   const path = `lessons/${lesson.id}`;
   try {
-    await setDoc(doc(db, 'lessons', lesson.id), lesson);
+    const sanitized = sanitizeForFirestore(lesson);
+    await setDoc(doc(db, 'lessons', lesson.id), sanitized);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -544,6 +570,33 @@ export async function saveAssignment(assignment: Assignment): Promise<void> {
 // ================= SUBMISSIONS =================
 export function subscribeSubmissions(classroomId: string, callback: (subs: Submission[]) => void) {
   const path = 'submissions';
+
+  const mergeWithLocal = (firestoreList: Submission[]): Submission[] => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('eduvibe_local_submissions') || '[]');
+      const localList: Submission[] = Array.isArray(raw) ? raw.filter((s) => s && s.classroomId === classroomId) : [];
+      const map = new Map<string, Submission>();
+      firestoreList.forEach((s) => map.set(s.id, s));
+      localList.forEach((s) => {
+        if (!map.has(s.id)) {
+          map.set(s.id, s);
+        } else {
+          const existing = map.get(s.id)!;
+          map.set(s.id, {
+            ...existing,
+            fileUrl: existing.fileUrl || s.fileUrl,
+            fileData: existing.fileData || s.fileData,
+            fileName: existing.fileName || s.fileName,
+            files: (existing.files && existing.files.length > 0) ? existing.files : s.files,
+          });
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+    } catch {
+      return firestoreList.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || ''));
+    }
+  };
+
   try {
     const q = query(collection(db, path), where('classroomId', '==', classroomId));
     return onSnapshot(
@@ -553,24 +606,84 @@ export function subscribeSubmissions(classroomId: string, callback: (subs: Submi
         snapshot.forEach((docSnap) => {
           list.push({ id: docSnap.id, ...(docSnap.data() as any) });
         });
-        callback(list.sort((a, b) => (b.submittedAt || '').localeCompare(a.submittedAt || '')));
+        callback(mergeWithLocal(list));
       },
       (error) => {
-        handleFirestoreError(error, OperationType.LIST, path);
+        console.warn('subscribeSubmissions Firestore notice:', error);
+        callback(mergeWithLocal([]));
       }
     );
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
+    console.warn('subscribeSubmissions catch notice:', error);
+    callback(mergeWithLocal([]));
     return () => {};
   }
 }
 
 export async function submitHomework(submission: Submission): Promise<void> {
   const path = `submissions/${submission.id}`;
+
+  // Cache in localStorage safely without crashing on quota limit
   try {
-    await setDoc(doc(db, 'submissions', submission.id), submission);
+    const raw = JSON.parse(localStorage.getItem('eduvibe_local_submissions') || '[]');
+    const list: Submission[] = Array.isArray(raw) ? raw : [];
+    const idx = list.findIndex((s) => s && s.id === submission.id);
+    if (idx >= 0) {
+      list[idx] = submission;
+    } else {
+      list.push(submission);
+    }
+    localStorage.setItem('eduvibe_local_submissions', JSON.stringify(list));
+  } catch {
+    // If local storage is full, try caching without large base64 fileData
+    try {
+      const raw = JSON.parse(localStorage.getItem('eduvibe_local_submissions') || '[]');
+      const list: Submission[] = Array.isArray(raw) ? raw : [];
+      const compactSub = { ...submission };
+      if (compactSub.fileData && compactSub.fileData.length > 100000) {
+        delete compactSub.fileData;
+      }
+      if (compactSub.files) {
+        compactSub.files = compactSub.files.map(f => {
+          if (f.data && f.data.length > 100000) {
+            const { data, ...rest } = f;
+            return rest;
+          }
+          return f;
+        });
+      }
+      const idx = list.findIndex((s) => s && s.id === compactSub.id);
+      if (idx >= 0) {
+        list[idx] = compactSub;
+      } else {
+        list.push(compactSub);
+      }
+      localStorage.setItem('eduvibe_local_submissions', JSON.stringify(list));
+    } catch {
+      // ignore
+    }
+  }
+
+  try {
+    const safeSubmission = { ...submission };
+    // If base64 payload is larger than 150KB, strip it from Firestore document to stay well under 1MB limit
+    if (safeSubmission.fileData && safeSubmission.fileData.length > 150000) {
+      delete safeSubmission.fileData;
+    }
+    if (safeSubmission.files && Array.isArray(safeSubmission.files)) {
+      safeSubmission.files = safeSubmission.files.map(f => {
+        if (f.data && f.data.length > 150000) {
+          const { data, ...rest } = f;
+          return rest;
+        }
+        return f;
+      });
+    }
+
+    const sanitized = sanitizeForFirestore(safeSubmission);
+    await setDoc(doc(db, 'submissions', submission.id), sanitized);
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('submitHomework Firestore notice:', error);
   }
 }
 
@@ -580,6 +693,7 @@ export async function gradeSubmission(
     score: number;
     teacherFeedback: string;
     aiFeedback?: string;
+    rubricScores?: RubricScoreItem[];
     pointsAwarded: number;
     status: 'graded';
     studentId: string;
@@ -591,6 +705,7 @@ export async function gradeSubmission(
       score: updates.score,
       teacherFeedback: updates.teacherFeedback,
       ...(updates.aiFeedback ? { aiFeedback: updates.aiFeedback } : {}),
+      ...(updates.rubricScores ? { rubricScores: updates.rubricScores } : {}),
       pointsAwarded: updates.pointsAwarded,
       status: 'graded',
     });
@@ -719,6 +834,15 @@ export async function saveQuiz(quiz: Quiz): Promise<void> {
     await setDoc(doc(db, 'quizzes', quiz.id), quiz);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function deleteQuiz(quizId: string): Promise<void> {
+  const path = `quizzes/${quizId}`;
+  try {
+    await deleteDoc(doc(db, 'quizzes', quizId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 

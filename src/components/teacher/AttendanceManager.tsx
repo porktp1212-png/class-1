@@ -14,6 +14,7 @@ import {
   ChevronRight,
   TrendingUp,
   Users,
+  User,
 } from 'lucide-react';
 
 interface AttendanceManagerProps {
@@ -264,11 +265,9 @@ export const AttendanceManager: React.FC<AttendanceManagerProps> = ({
                     {/* Student Info */}
                     <div className="flex items-center gap-3 min-w-[220px]">
                       <span className="text-xs font-bold text-slate-400 w-5 text-right">{idx + 1}.</span>
-                      <img
-                        src={student.avatar}
-                        alt={student.name}
-                        className="w-10 h-10 rounded-full object-cover border border-slate-200"
-                      />
+                      <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 flex items-center justify-center font-bold text-xs shrink-0">
+                        <User className="w-5 h-5 text-slate-600" />
+                      </div>
                       <div>
                         <div className="text-xs font-bold text-slate-900">{student.name}</div>
                         <div className="text-[11px] text-slate-500">รหัสนักเรียน: {student.studentId} | {student.grade}</div>

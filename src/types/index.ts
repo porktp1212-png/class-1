@@ -37,9 +37,19 @@ export interface Lesson {
   title: string;
   content: string;
   mediaUrl?: string;
-  mediaType?: 'pdf' | 'video' | 'link' | 'slide' | 'doc';
+  mediaType?: 'pdf' | 'video' | 'link' | 'slide' | 'doc' | 'sheet' | 'audio' | 'image' | 'archive' | 'other';
+  fileName?: string;
+  fileSize?: number;
+  files?: AttachedFile[];
   unit?: string;
   createdAt: string;
+}
+
+export interface RubricCriterion {
+  id: string;
+  title: string;
+  description?: string;
+  maxScore: number;
 }
 
 export interface Assignment {
@@ -50,7 +60,27 @@ export interface Assignment {
   dueDate: string;
   maxScore: number;
   pointsReward: number;
+  rubrics?: RubricCriterion[];
   createdAt: string;
+}
+
+export interface RubricScoreItem {
+  criterionId?: string;
+  title: string;
+  score: number;
+  maxScore: number;
+  comment?: string;
+}
+
+export interface AttachedFile {
+  id?: string;
+  name: string;
+  type: string;
+  size: number;
+  url?: string;
+  data?: string; // Data URL or server file path
+  uploadStatus?: 'uploading' | 'ready' | 'error';
+  errorMessage?: string;
 }
 
 export interface Submission {
@@ -62,10 +92,16 @@ export interface Submission {
   submittedAt: string;
   content: string;
   fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
+  fileData?: string; // Base64 Data URL for preview & AI evaluation
+  files?: AttachedFile[]; // Multi-file attachments
   score?: number | null;
   status: 'submitted' | 'graded' | 'late';
   teacherFeedback?: string;
   aiFeedback?: string;
+  rubricScores?: RubricScoreItem[];
   pointsAwarded?: number;
 }
 

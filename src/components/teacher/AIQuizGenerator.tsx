@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { Classroom, Quiz, QuizQuestion } from '../../types';
-import { saveQuiz } from '../../services/firestoreService';
+import { saveQuiz, deleteQuiz } from '../../services/firestoreService';
 import {
   BrainCircuit,
   Sparkles,
@@ -14,6 +14,7 @@ import {
   Loader2,
   Award,
   Layers,
+  Trash2,
 } from 'lucide-react';
 
 interface AIQuizGeneratorProps {
@@ -41,6 +42,20 @@ export const AIQuizGenerator: React.FC<AIQuizGeneratorProps> = ({
   } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [deletingQuizId, setDeletingQuizId] = useState<string | null>(null);
+
+  const handleDeleteExistingQuiz = async (quizId: string) => {
+    if (!window.confirm('คุณต้องการลบแบบทดสอบนี้ใช่หรือไม่?')) return;
+    try {
+      setDeletingQuizId(quizId);
+      await deleteQuiz(quizId);
+    } catch (err) {
+      console.error('Failed to delete quiz:', err);
+      alert('เกิดข้อผิดพลาดในการลบแบบทดสอบ');
+    } finally {
+      setDeletingQuizId(null);
+    }
+  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,7 +293,18 @@ export const AIQuizGenerator: React.FC<AIQuizGeneratorProps> = ({
               <div className="space-y-2">
                 {quizzes.map((q) => (
                   <div key={q.id} className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                    <div className="font-bold text-slate-800">{q.title}</div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="font-bold text-slate-800">{q.title}</div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteExistingQuiz(q.id)}
+                        disabled={deletingQuizId === q.id}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors shrink-0 disabled:opacity-50"
+                        title="ลบแบบทดสอบนี้"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                     <div className="flex items-center justify-between mt-1 text-[11px] text-slate-500">
                       <span>{q.questions.length} ข้อ ({q.timeLimitMinutes} นาที)</span>
                       <span className="text-purple-600 font-semibold">คะแนนเต็ม {q.maxScore}</span>

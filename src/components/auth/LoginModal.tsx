@@ -91,16 +91,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  const handleDemo = async (demoRole: UserRole) => {
-    try {
-      setError(null);
-      await loginDemo(demoRole);
-      onClose();
-    } catch (err: any) {
-      setError('เข้าสู่ระบบตัวอย่างไม่สำเร็จ');
-    }
-  };
-
   return (
     <div
       id="login-modal-overlay"
@@ -293,31 +283,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose }) => {
               <span>{tab === 'login' ? 'เข้าสู่ระบบ' : 'สมัครสมาชิกและเข้าใช้งาน'}</span>
             </button>
           </form>
-
-          {/* Quick Demo Options */}
-          <div className="pt-2 border-t border-slate-100">
-            <div className="text-[11px] text-slate-500 font-semibold mb-2">
-              ทดลองใช้งานด่วน (1 คลิก):
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => handleDemo('teacher')}
-                className="p-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-800 text-left text-xs font-medium hover:bg-indigo-100 transition-colors"
-              >
-                <div className="font-bold">ครูสมชาย (ครู)</div>
-                <div className="text-[10px] text-indigo-600">ตรวจงาน ออกข้อสอบ AI</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDemo('student')}
-                className="p-2 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 text-left text-xs font-medium hover:bg-teal-100 transition-colors"
-              >
-                <div className="font-bold">สมหญิง (นักเรียน)</div>
-                <div className="text-[10px] text-teal-600">ส่งงาน สะสมแต้ม</div>
-              </button>
-            </div>
-          </div>
 
           {/* Google Sign-in */}
           <button

@@ -10,9 +10,10 @@ import {
   getAllRegisteredStudents,
 } from '../../services/firestoreService';
 import {
-  QrCode,
+  Key,
   Copy,
   Check,
+  User,
   UserPlus,
   Upload,
   FileSpreadsheet,
@@ -62,7 +63,7 @@ export const ClassroomManager: React.FC<ClassroomManagerProps> = ({
   onClassroomDeleted,
   onOpenCreateClassroom,
 }) => {
-  const [activeTab, setActiveTab] = useState<'qr' | 'students' | 'import' | 'backup' | 'settings'>('qr');
+  const [activeTab, setActiveTab] = useState<'code' | 'students' | 'import' | 'backup' | 'settings'>('code');
   const [copiedCode, setCopiedCode] = useState(false);
 
   // Edit Classroom Settings state
@@ -125,7 +126,7 @@ export const ClassroomManager: React.FC<ClassroomManagerProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [classroom?.id, classroom?.studentIds]);
+  }, [classroom?.id, classroom?.studentIds?.join(',')]);
 
   useEffect(() => {
     if (!classroom) return;
@@ -179,35 +180,53 @@ export const ClassroomManager: React.FC<ClassroomManagerProps> = ({
 
   const handleAddManualStudent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudentName.trim() || !newStudentId.trim()) return;
+    const cleanStdId = newStudentId.trim();
+    const cleanName = newStudentName.trim();
+    if (!cleanName || !cleanStdId) return;
 
-    const newStd: UserProfile = {
-      id: `std_${newStudentId.trim()}`,
-      email: `${newStudentId.trim()}@school.ac.th`,
-      name: newStudentName.trim(),
-      role: 'student',
-      studentId: newStudentId.trim(),
-      grade: newStudentGrade,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      totalPoints: 100,
-      level: 1,
-      createdAt: new Date().toISOString(),
-    };
+    // Check if an existing registered student already has this studentId or email
+    const existingStd = allRegisteredStudents.find(
+      (s) => s.studentId === cleanStdId || s.email.toLowerCase() === `${cleanStdId}@school.ac.th`.toLowerCase() || s.id === `std_${cleanStdId}`
+    );
+
+    const studentToAdd: UserProfile = existingStd
+      ? {
+          ...existingStd,
+          name: cleanName || existingStd.name,
+          grade: newStudentGrade || existingStd.grade || 'ม.3/1',
+          studentId: cleanStdId,
+        }
+      : {
+          id: `std_${cleanStdId}`,
+          email: `${cleanStdId}@school.ac.th`,
+          name: cleanName,
+          role: 'student',
+          studentId: cleanStdId,
+          grade: newStudentGrade,
+          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          totalPoints: 100,
+          level: 1,
+          createdAt: new Date().toISOString(),
+        };
 
     try {
-      await saveUserProfile(newStd);
-      await addStudentToClassroom(classroom.id, newStd.id);
+      await saveUserProfile(studentToAdd);
+      await addStudentToClassroom(classroom.id, studentToAdd.id);
 
-      const updatedStudentIds = Array.from(new Set([...(classroom.studentIds || []), newStd.id]));
+      const updatedStudentIds = Array.from(new Set([...(classroom.studentIds || []), studentToAdd.id]));
       const updatedClassroom = { ...classroom, studentIds: updatedStudentIds };
+      
+      // Update local student list and registered list immediately
+      setStudents((prev) => [...prev.filter((s) => s.id !== studentToAdd.id), studentToAdd]);
+      setAllRegisteredStudents((prev) => [...prev.filter((s) => s.id !== studentToAdd.id), studentToAdd]);
+
       if (onClassroomUpdated) {
         onClassroomUpdated(updatedClassroom);
       }
 
-      setStudents((prev) => [...prev.filter((s) => s.id !== newStd.id), newStd]);
       setNewStudentName('');
       setNewStudentId('');
-      setStatusNotice({ type: 'success', message: `เพิ่มนักเรียน "${newStd.name}" เข้าสู่ห้องเรียนสำเร็จ` });
+      setStatusNotice({ type: 'success', message: `เพิ่มนักเรียน "${studentToAdd.name}" เข้าสู่ห้องเรียนสำเร็จ` });
       setTimeout(() => setStatusNotice(null), 3500);
     } catch (err) {
       console.error(err);
@@ -423,15 +442,15 @@ export const ClassroomManager: React.FC<ClassroomManagerProps> = ({
         <div className="flex border-b border-slate-200 bg-slate-50 px-6 text-xs font-semibold overflow-x-auto">
           <button
             type="button"
-            onClick={() => setActiveTab('qr')}
+            onClick={() => setActiveTab('code')}
             className={`py-3 px-3 border-b-2 transition-all flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'qr'
+              activeTab === 'code'
                 ? 'border-indigo-600 text-indigo-700 bg-white'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <QrCode className="w-4 h-4" />
-            <span>คิวอาร์โค้ด & รหัสเข้าห้อง</span>
+            <Key className="w-4 h-4" />
+            <span>รหัสเข้าห้องเรียน</span>
           </button>
 
           <button
@@ -489,45 +508,51 @@ export const ClassroomManager: React.FC<ClassroomManagerProps> = ({
 
         {/* Tab Content */}
         <div className="p-6 text-xs space-y-4 max-h-[70vh] overflow-y-auto">
-          {/* TAB 1: QR CODE & CODE */}
-          {activeTab === 'qr' && (
-            <div className="text-center space-y-5 py-2">
-              <div className="max-w-sm mx-auto p-6 bg-slate-50 border-2 border-indigo-100 rounded-3xl space-y-4">
-                <span className="px-3 py-1 bg-indigo-100 text-indigo-800 font-bold rounded-full text-xs">
-                  สแกนด้วยกล้องมือถือเพื่อเข้าห้องเรียนทันที
-                </span>
-
-                {/* Stylized QR representation */}
-                <div className="w-48 h-48 mx-auto bg-white p-3 rounded-2xl border border-slate-300 shadow-md flex items-center justify-center">
-                  <div className="w-full h-full bg-slate-900 rounded-xl flex flex-col items-center justify-center text-white p-2">
-                    <QrCode className="w-24 h-24 text-white" />
-                    <span className="text-[10px] font-mono tracking-widest mt-1 text-slate-300">
-                      ROOM: {classroom.code}
-                    </span>
-                  </div>
+          {/* TAB 1: CLASSROOM CODE */}
+          {activeTab === 'code' && (
+            <div className="text-center space-y-6 py-4">
+              <div className="max-w-md mx-auto p-8 bg-linear-to-b from-indigo-50/80 to-white border-2 border-indigo-200/80 rounded-3xl shadow-sm space-y-5">
+                <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto shadow-md">
+                  <Key className="w-7 h-7" />
                 </div>
 
                 <div>
-                  <div className="text-xs text-slate-500">หรือใช้นักเรียนกรอกรหัส 6 หลัก:</div>
-                  <div className="flex items-center justify-center gap-2 mt-1.5">
-                    <span className="text-2xl font-extrabold font-mono tracking-widest text-indigo-700 bg-white px-4 py-1.5 rounded-xl border border-indigo-200 shadow-inner">
-                      {classroom.code}
-                    </span>
-                    <button
-                      type="button"
-                      id="btn-copy-class-code"
-                      onClick={handleCopyCode}
-                      className="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-xs transition-colors"
-                      title="คัดลอกรหัส"
-                    >
-                      {copiedCode ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                    </button>
-                  </div>
+                  <h3 className="text-base font-bold text-slate-800">รหัสประจำห้องเรียน (Classroom Code)</h3>
+                  <p className="text-xs text-slate-500 mt-1">
+                    บอกรหัส 6 หลักนี้ให้นักเรียนกรอกเพื่อเข้าร่วมห้องเรียน {classroom.name}
+                  </p>
+                </div>
+
+                <div className="p-4 bg-white rounded-2xl border-2 border-indigo-300 shadow-inner flex items-center justify-center gap-3">
+                  <span className="text-3xl sm:text-4xl font-black font-mono tracking-widest text-indigo-700 select-all">
+                    {classroom.code}
+                  </span>
+                  <button
+                    type="button"
+                    id="btn-copy-class-code"
+                    onClick={handleCopyCode}
+                    className="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-xs transition-colors cursor-pointer"
+                    title="คัดลอกรหัสเข้าห้องเรียน"
+                  >
+                    {copiedCode ? <Check className="w-5 h-5 text-emerald-300" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                </div>
+
+                {copiedCode && (
+                  <p className="text-xs text-emerald-600 font-bold animate-in fade-in">
+                    ✓ คัดลอกรหัสเข้าห้องเรียนเรียบร้อยแล้ว!
+                  </p>
+                )}
+
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 text-left space-y-2 text-xs">
+                  <div className="font-bold text-slate-800">คำแนะนำสำหรับนักเรียน:</div>
+                  <ol className="list-decimal list-inside space-y-1 text-slate-600 text-[11px] leading-relaxed">
+                    <li>เข้าสู่ระบบด้วยบัญชีนักเรียน</li>
+                    <li>กดปุ่ม <strong>"เข้าร่วมห้องเรียน"</strong> ที่หน้าหลัก</li>
+                    <li>กรอกรหัส 6 หลัก <strong>{classroom.code}</strong> แล้วกดยืนยัน</li>
+                  </ol>
                 </div>
               </div>
-              <p className="text-slate-500 text-xs max-w-md mx-auto">
-                ให้นักเรียนเปิดแอป EduVibe บนสมาร์ตโฟน แล้วกดปุ่ม "เข้าร่วมห้องเรียน" พร้อมกรอกรหัสนี้เพื่อเริ่มใช้งานได้ทันที
-              </p>
             </div>
           )}
 
@@ -712,11 +737,9 @@ export const ClassroomManager: React.FC<ClassroomManagerProps> = ({
                     .map((std) => (
                       <div key={std.id} className="p-3.5 flex items-center justify-between hover:bg-slate-50 transition-colors">
                         <div className="flex items-center gap-3">
-                          <img
-                            src={std.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'}
-                            alt={std.name}
-                            className="w-9 h-9 rounded-full object-cover border border-slate-200"
-                          />
+                          <div className="w-9 h-9 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center font-bold text-xs shrink-0">
+                            <User className="w-4 h-4" />
+                          </div>
                           <div>
                             <div className="font-bold text-slate-900 text-xs sm:text-sm">{std.name}</div>
                             <div className="text-[11px] text-slate-500">

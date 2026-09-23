@@ -125,11 +125,13 @@ export const ClassroomChat: React.FC<ClassroomChatProps> = ({
                 key={m.id}
                 className={`flex gap-3 max-w-xl ${isMe ? 'ml-auto flex-row-reverse' : ''}`}
               >
-                <img
-                  src={m.senderAvatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
-                  alt={m.senderName}
-                  className="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200 mt-1"
-                />
+                <div
+                  className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 mt-1 text-xs font-bold ${
+                    isTeacher ? 'bg-indigo-100 text-indigo-700 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}
+                >
+                  <User className="w-4 h-4" />
+                </div>
 
                 <div className={`space-y-1 ${isMe ? 'text-right' : ''}`}>
                   <div className="flex items-center gap-1.5 text-[11px] text-slate-500">

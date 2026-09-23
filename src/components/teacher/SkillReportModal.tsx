@@ -13,6 +13,7 @@ import {
   Loader2,
   CalendarCheck,
   FileCheck,
+  User,
 } from 'lucide-react';
 
 interface SkillReportModalProps {
@@ -138,11 +139,9 @@ export const SkillReportModal: React.FC<SkillReportModalProps> = ({
         {/* Header */}
         <div className="bg-linear-to-r from-teal-700 via-indigo-700 to-blue-700 p-6 text-white flex items-center justify-between print:bg-none print:text-black">
           <div className="flex items-center gap-3">
-            <img
-              src={fullStudent.avatar}
-              alt={fullStudent.name}
-              className="w-14 h-14 rounded-2xl object-cover border-2 border-white/60 shadow-md"
-            />
+            <div className="w-14 h-14 rounded-2xl bg-white/20 border-2 border-white/60 shadow-md flex items-center justify-center font-bold text-white shrink-0">
+              <User className="w-7 h-7 text-white" />
+            </div>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-lg font-bold">{fullStudent.name}</span>

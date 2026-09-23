@@ -439,46 +439,6 @@ export const LoginPage: React.FC = () => {
                     <span>เข้าสู่ระบบด้วย Google Account</span>
                   </button>
 
-                  {/* 1-Click Quick Demo Access */}
-                  <div className="pt-2">
-                    <p className="text-[11px] text-slate-400 font-semibold mb-2">
-                      หรือทดลองใช้งานด่วน (1 คลิก):
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        id="btn-quick-demo-teacher"
-                        onClick={() => handleDemoLogin('teacher')}
-                        disabled={isSubmitting || authLoading}
-                        className="p-2.5 rounded-xl border border-indigo-500/30 bg-indigo-950/40 hover:bg-indigo-900/50 text-left transition-all flex items-center gap-2 cursor-pointer group"
-                      >
-                        <UserCheck className="w-4 h-4 text-indigo-400 shrink-0" />
-                        <div className="truncate">
-                          <div className="text-[11px] font-bold text-white group-hover:text-indigo-300">
-                            ครูสมชาย (ครูผู้สอน)
-                          </div>
-                          <div className="text-[10px] text-slate-400">เข้าชมระบบครูทันที</div>
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        id="btn-quick-demo-student"
-                        onClick={() => handleDemoLogin('student')}
-                        disabled={isSubmitting || authLoading}
-                        className="p-2.5 rounded-xl border border-teal-500/30 bg-teal-950/40 hover:bg-teal-900/50 text-left transition-all flex items-center gap-2 cursor-pointer group"
-                      >
-                        <BookOpen className="w-4 h-4 text-teal-400 shrink-0" />
-                        <div className="truncate">
-                          <div className="text-[11px] font-bold text-white group-hover:text-teal-300">
-                            สมหญิง (นักเรียน)
-                          </div>
-                          <div className="text-[10px] text-slate-400">เข้าชมระบบนักเรียน</div>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Switch to Register link */}
                   <div className="text-center pt-2">
                     <span className="text-xs text-slate-400">ยังไม่มีบัญชีใช้งานใช่หรือไม่? </span>

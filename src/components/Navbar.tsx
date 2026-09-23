@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   Plus,
   KeyRound,
-  Trash2,
+  User,
+  Camera,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -24,11 +25,11 @@ interface NavbarProps {
   activeClassroom: Classroom | null;
   onSelectClassroom: (c: Classroom) => void;
   onOpenChat: () => void;
-  onClearAllData?: () => void;
   pendingSubmissionsCount: number;
   onOpenCreateClassroom?: () => void;
   onOpenJoinClassroom?: () => void;
   onOpenLogin?: () => void;
+  onOpenEditProfile?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -36,11 +37,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeClassroom,
   onSelectClassroom,
   onOpenChat,
-  onClearAllData,
   pendingSubmissionsCount,
   onOpenCreateClassroom,
   onOpenJoinClassroom,
   onOpenLogin,
+  onOpenEditProfile,
 }) => {
   const { currentUser, logout } = useAuth();
   const [showClassDropdown, setShowClassDropdown] = useState(false);
@@ -175,20 +176,6 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Action Icons & Controls */}
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Clear All System Data (For reset or trial setup) */}
-            {onClearAllData && (
-              <button
-                type="button"
-                id="btn-clear-system-data"
-                onClick={onClearAllData}
-                title="ล้างข้อมูลระบบทั้งหมดเพื่อเริ่มต้นใช้งานจริง"
-                className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-200 text-xs font-medium text-rose-600 hover:bg-rose-50 transition-colors"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                <span>ล้างข้อมูลระบบ</span>
-              </button>
-            )}
-
             {/* Current Role Badge (Fixed based on user account) */}
             {currentUser && (
               <div
@@ -287,7 +274,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                           กิจกรรมห้องเรียนใหม่
                         </div>
                         <p className="text-[11px] text-blue-700 mt-1">
-                          คุณครูได้อัปเดตสื่อการสอนและแบบทดสอบย่อยแล้ว
+                          คุณครูได้อัปเดตสื่อการสอนและงานใหม่แล้ว
                         </p>
                       </div>
                     )}
@@ -296,23 +283,19 @@ export const Navbar: React.FC<NavbarProps> = ({
               )}
             </div>
 
-            {/* User Profile Avatar & Menu */}
+            {/* User Profile Avatar & Menu (No Photo) */}
             {currentUser && (
               <div className="relative">
                 <button
                   type="button"
                   id="btn-user-avatar"
                   onClick={() => setShowUserMenu(!showUserMenu)}
-                  className="flex items-center gap-2 p-1 rounded-full hover:ring-2 hover:ring-blue-400 transition-all"
+                  className="flex items-center gap-2 p-1 rounded-full hover:ring-2 hover:ring-blue-400 transition-all cursor-pointer"
+                  title="ข้อมูลผู้ใช้"
                 >
-                  <img
-                    src={
-                      currentUser.avatar ||
-                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'
-                    }
-                    alt={currentUser.name}
-                    className="w-8 h-8 rounded-full object-cover border border-slate-300 shadow-xs"
-                  />
+                  <div className="w-8 h-8 rounded-full bg-linear-to-tr from-indigo-600 to-purple-600 text-white font-bold flex items-center justify-center text-xs shadow-xs border border-indigo-400/40">
+                    <User className="w-4 h-4" />
+                  </div>
                 </button>
 
                 {showUserMenu && (
@@ -334,20 +317,22 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </span>
                       </div>
                     </div>
-                    {onClearAllData && currentUser.role === 'teacher' && (
+
+                    {onOpenEditProfile && (
                       <button
                         type="button"
-                        id="btn-nav-clear-all"
+                        id="btn-nav-edit-profile"
                         onClick={() => {
                           setShowUserMenu(false);
-                          onClearAllData();
+                          onOpenEditProfile();
                         }}
-                        className="w-full text-left px-4 py-2 hover:bg-rose-50 text-rose-700 flex items-center justify-between border-t border-slate-100 font-medium"
+                        className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 flex items-center justify-between font-medium transition-colors"
                       >
-                        <span className="flex items-center gap-1.5">
-                          <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                          <span>ล้างข้อมูลระบบทั้งหมด</span>
+                        <span className="flex items-center gap-2">
+                          <User className="w-3.5 h-3.5 text-blue-600" />
+                          <span>แก้ไขข้อมูล / เปลี่ยนรูปโปรไฟล์</span>
                         </span>
+                        <Camera className="w-3.5 h-3.5 text-slate-400" />
                       </button>
                     )}
 
@@ -358,7 +343,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                         logout();
                         setShowUserMenu(false);
                       }}
-                      className="w-full text-left px-4 py-2 hover:bg-slate-50 text-slate-700 flex items-center justify-between border-t border-slate-100 mt-1"
+                      className="w-full text-left px-4 py-2 hover:bg-slate-50 text-rose-600 flex items-center justify-between border-t border-slate-100 mt-1"
                     >
                       <span>ออกจากระบบ</span>
                       <LogOut className="w-3.5 h-3.5" />

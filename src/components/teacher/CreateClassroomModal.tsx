@@ -6,7 +6,6 @@ import {
   Plus,
   Sparkles,
   RefreshCw,
-  QrCode,
   Copy,
   Check,
   X,

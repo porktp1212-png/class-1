@@ -17,8 +17,9 @@ import { AIGradingModal } from './components/teacher/AIGradingModal';
 import { StudentDashboard } from './components/student/StudentDashboard';
 import { StudentAssignments } from './components/student/StudentAssignments';
 import { StudentQuizPlayer } from './components/student/StudentQuizPlayer';
-import { StudentCertificates } from './components/student/StudentCertificates';
+import { StudentPoints } from './components/student/StudentPoints';
 import { ClassroomChat } from './components/chat/ClassroomChat';
+import { EditProfileModal } from './components/profile/EditProfileModal';
 import {
   subscribeToClassrooms,
   subscribeToAssignments,
@@ -27,7 +28,6 @@ import {
   subscribeToBehaviors,
   subscribeToQuizzes,
   subscribeToLessons,
-  subscribeToCertificates,
   getClassroomStudents,
   clearAllSystemData,
 } from './services/firestoreService';
@@ -39,7 +39,6 @@ import type {
   BehaviorRecord,
   Quiz,
   Lesson,
-  Certificate,
   UserProfile,
 } from './types';
 import {
@@ -61,7 +60,7 @@ import {
 } from 'lucide-react';
 
 const AppContent: React.FC = () => {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, updateProfile } = useAuth();
 
   // Classroom state - Start empty for real production use
   const [classrooms, setClassrooms] = useState<Classroom[]>([]);
@@ -74,16 +73,22 @@ const AppContent: React.FC = () => {
   const [behaviors, setBehaviors] = useState<BehaviorRecord[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [certificates, setCertificates] = useState<Certificate[]>([]);
 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+
+  useEffect(() => {
+    if (activeTab === 'quizzes') {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab]);
 
   // Enrolled students in active classroom
   const [classroomStudents, setClassroomStudents] = useState<UserProfile[]>([]);
 
   // Modal states
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false);
   const [isClassManagerOpen, setIsClassManagerOpen] = useState(false);
   const [isCreateClassModalOpen, setIsCreateClassModalOpen] = useState(false);
   const [isJoinClassModalOpen, setIsJoinClassModalOpen] = useState(false);
@@ -104,6 +109,8 @@ const AppContent: React.FC = () => {
     setClassrooms((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
     if (activeClassroom?.id === updated.id) {
       setActiveClassroom(updated);
+      const studentIds = (updated.studentIds || []).filter((id) => id !== updated.teacherId);
+      getClassroomStudents(studentIds).then(setClassroomStudents).catch(console.warn);
     }
   };
 
@@ -125,7 +132,7 @@ const AppContent: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [activeClassroom?.id, activeClassroom?.studentIds]);
+  }, [activeClassroom?.id, activeClassroom?.studentIds?.join(',')]);
 
   const handleClassroomDeleted = (deletedId: string) => {
     setClassrooms((prev) => {
@@ -150,18 +157,35 @@ const AppContent: React.FC = () => {
   // Assignment selected by student from Dashboard to jump straight to submit
   const [studentPendingAsg, setStudentPendingAsg] = useState<Assignment | null>(null);
 
-  // Subscribe to classrooms
+  // Subscribe to classrooms for the current user only
   useEffect(() => {
+    if (!currentUser) {
+      setClassrooms([]);
+      setActiveClassroom(null);
+      return;
+    }
+
     const unsub = subscribeToClassrooms((cls) => {
-      setClassrooms(cls);
-      if (cls.length > 0) {
-        setActiveClassroom((prev) => (prev ? cls.find((c) => c.id === prev.id) || cls[0] : cls[0]));
+      // Filter classrooms relevant to this user:
+      // If teacher: classrooms created by teacher
+      // If student: classrooms where studentIds includes student
+      const userClassrooms = cls.filter((c) => {
+        if (currentUser.role === 'teacher') {
+          return c.teacherId === currentUser.id;
+        } else {
+          return Array.isArray(c.studentIds) && c.studentIds.includes(currentUser.id);
+        }
+      });
+
+      setClassrooms(userClassrooms);
+      if (userClassrooms.length > 0) {
+        setActiveClassroom((prev) => (prev ? userClassrooms.find((c) => c.id === prev.id) || userClassrooms[0] : userClassrooms[0]));
       } else {
         setActiveClassroom(null);
       }
     });
     return () => unsub();
-  }, []);
+  }, [currentUser?.id, currentUser?.role]);
 
   // Subscribe to classroom entities whenever activeClassroom changes
   useEffect(() => {
@@ -184,13 +208,6 @@ const AppContent: React.FC = () => {
     };
   }, [activeClassroom?.id]);
 
-  // Subscribe to student certificates if student
-  useEffect(() => {
-    if (!currentUser) return;
-    const unsubCert = subscribeToCertificates(currentUser.id, setCertificates);
-    return () => unsubCert();
-  }, [currentUser?.id]);
-
   const handleOpenGradingModal = (submission: Submission, assignment: Assignment) => {
     setGradingSubmission(submission);
     setGradingAssignment(assignment);
@@ -200,23 +217,6 @@ const AppContent: React.FC = () => {
   const handleOpenSkillModal = (student: { id: string; name: string }) => {
     setSkillStudent(student);
     setIsSkillModalOpen(true);
-  };
-
-  const handleClearAllData = async () => {
-    if (window.confirm('คุณต้องการล้างห้องเรียน นักเรียน และข้อมูลทั้งหมดออกจากระบบ เพื่อเริ่มต้นใช้งานจริงใช่หรือไม่?')) {
-      await clearAllSystemData();
-      setClassrooms([]);
-      setActiveClassroom(null);
-      setClassroomStudents([]);
-      setAssignments([]);
-      setSubmissions([]);
-      setAttendanceRecords([]);
-      setBehaviors([]);
-      setQuizzes([]);
-      setLessons([]);
-      setCertificates([]);
-      alert('ล้างข้อมูลระบบทั้งหมดเรียบร้อยแล้ว');
-    }
   };
 
   if (loading) {
@@ -258,7 +258,6 @@ const AppContent: React.FC = () => {
       icon: FileCheck2,
       badge: pendingSubmissionsCount > 0 ? pendingSubmissionsCount : undefined,
     },
-    { id: 'ai-quiz', label: 'AI ออกข้อสอบ', icon: BrainCircuit, highlight: true },
     { id: 'lessons', label: 'คลังบทเรียน & สื่อ', icon: FolderOpen },
     { id: 'behaviors', label: 'บันทึกพฤติกรรม', icon: HeartHandshake },
     { id: 'chat', label: 'แชทห้องเรียน & ถามตอบ', icon: MessageSquare },
@@ -267,9 +266,8 @@ const AppContent: React.FC = () => {
   const studentTabs: TabItem[] = [
     { id: 'dashboard', label: 'หน้าหลัก & ตารางเรียน', icon: LayoutDashboard },
     { id: 'assignments', label: 'การบ้านของฉัน', icon: FileCheck2 },
-    { id: 'quizzes', label: 'ห้องสอบ & ข้อสอบย่อย', icon: BrainCircuit },
     { id: 'lessons', label: 'คลังบทเรียน & สื่อ', icon: BookOpen },
-    { id: 'certificates', label: 'เกียรติบัตร & สะสมแต้ม', icon: Award, highlight: true },
+    { id: 'points', label: 'สะสมแต้ม & เลเวล', icon: Sparkles, highlight: true },
     { id: 'chat', label: 'ถามครู & แชทห้องเรียน', icon: MessageSquare },
   ];
 
@@ -283,11 +281,11 @@ const AppContent: React.FC = () => {
         activeClassroom={activeClassroom}
         onSelectClassroom={(c) => setActiveClassroom(c)}
         onOpenChat={() => setActiveTab('chat')}
-        onClearAllData={handleClearAllData}
         pendingSubmissionsCount={pendingSubmissionsCount}
         onOpenCreateClassroom={() => setIsCreateClassModalOpen(true)}
         onOpenJoinClassroom={() => setIsJoinClassModalOpen(true)}
         onOpenLogin={() => setIsLoginModalOpen(true)}
+        onOpenEditProfile={() => setIsEditProfileOpen(true)}
       />
 
       {/* Sub-Navigation Bar */}
@@ -373,6 +371,7 @@ const AppContent: React.FC = () => {
                 submissions={submissions}
                 attendanceRecords={attendanceRecords}
                 behaviors={behaviors}
+                quizzes={quizzes}
                 studentCount={classroomStudents.length}
                 onNavigateTab={(tab) => {
                   if (tab === 'students') {
@@ -401,14 +400,8 @@ const AppContent: React.FC = () => {
                 classroom={activeClassroom}
                 assignments={assignments}
                 submissions={submissions}
+                students={classroomStudents}
                 onOpenGradingModal={handleOpenGradingModal}
-              />
-            )}
-
-            {activeTab === 'ai-quiz' && (
-              <AIQuizGenerator
-                classroom={activeClassroom}
-                quizzes={quizzes}
               />
             )}
 
@@ -443,16 +436,17 @@ const AppContent: React.FC = () => {
             {activeTab === 'dashboard' && (
               <StudentDashboard
                 classroom={activeClassroom}
+                classrooms={classrooms}
                 assignments={assignments}
                 submissions={submissions}
                 student={currentUser}
-                certificates={certificates}
                 onNavigateTab={(tab) => setActiveTab(tab)}
                 onSelectAssignmentToSubmit={(asg) => {
                   setStudentPendingAsg(asg);
                   setActiveTab('assignments');
                 }}
                 onClassroomJoined={handleClassroomJoined}
+                onOpenEditProfile={() => setIsEditProfileOpen(true)}
               />
             )}
 
@@ -465,14 +459,6 @@ const AppContent: React.FC = () => {
               />
             )}
 
-            {activeTab === 'quizzes' && (
-              <StudentQuizPlayer
-                classroom={activeClassroom}
-                quizzes={quizzes}
-                student={currentUser}
-              />
-            )}
-
             {activeTab === 'lessons' && (
               <LessonRepository
                 classroom={activeClassroom}
@@ -481,10 +467,11 @@ const AppContent: React.FC = () => {
               />
             )}
 
-            {activeTab === 'certificates' && (
-              <StudentCertificates
+            {activeTab === 'points' && (
+              <StudentPoints
                 student={currentUser}
-                certificates={certificates}
+                submissions={submissions}
+                behaviors={behaviors}
               />
             )}
 
@@ -563,6 +550,16 @@ const AppContent: React.FC = () => {
         onClose={() => setIsJoinClassModalOpen(false)}
         currentUser={currentUser}
         onClassroomJoined={handleClassroomJoined}
+      />
+
+      {/* Edit Profile Modal for Teachers and Students */}
+      <EditProfileModal
+        isOpen={isEditProfileOpen}
+        onClose={() => setIsEditProfileOpen(false)}
+        currentUser={currentUser}
+        onSaveProfile={async (updates) => {
+          await updateProfile(updates);
+        }}
       />
     </div>
   );
