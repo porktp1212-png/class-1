@@ -55,15 +55,23 @@ async function readRequestBody(req: IncomingMessage): Promise<any> {
     return {};
   }
 
-  if ((req as any).body) {
-    return (req as any).body;
+  if ((req as any).body !== undefined && (req as any).body !== null) {
+    const b = (req as any).body;
+    if (typeof b === "string") {
+      try {
+        return JSON.parse(b);
+      } catch {
+        return {};
+      }
+    }
+    return b;
   }
 
   return new Promise((resolve) => {
     let rawData = "";
     req.setEncoding("utf-8");
 
-    // Allow ample time for large uploads (up to 3 minutes)
+    // Safety timeout: 15s max for body read
     const timer = setTimeout(() => {
       cleanup();
       try {
@@ -71,7 +79,7 @@ async function readRequestBody(req: IncomingMessage): Promise<any> {
       } catch {
         resolve({});
       }
-    }, 180000);
+    }, 15000);
 
     function cleanup() {
       clearTimeout(timer);
@@ -82,8 +90,8 @@ async function readRequestBody(req: IncomingMessage): Promise<any> {
 
     function onData(chunk: string) {
       rawData += chunk;
-      // Allow up to 500MB payload to support unlimited file sizes (large documents, videos, archives)
-      if (rawData.length > 500 * 1024 * 1024) {
+      // Allow up to 100MB payload to support large uploads
+      if (rawData.length > 100 * 1024 * 1024) {
         cleanup();
         resolve({});
       }
@@ -114,6 +122,8 @@ async function readRequestBody(req: IncomingMessage): Promise<any> {
       } catch {
         resolve({});
       }
+    } else if (typeof req.resume === "function") {
+      req.resume();
     }
   });
 }
@@ -147,9 +157,16 @@ const MIME_MAP: Record<string, string> = {
 };
 
 export async function handleApiRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-  const fullUrl = req.url || "";
-  const url = fullUrl.split("?")[0] || "";
-  if (!url.startsWith("/api/")) return false;
+  const rawUrl = req.url || "";
+  let url = rawUrl.split("?")[0] || "";
+
+  // Normalize URL to always start with /api
+  if (!url.startsWith("/api")) {
+    url = "/api" + (url.startsWith("/") ? url : "/" + url);
+  }
+  if (url === "/api" || url === "/api/") {
+    url = "/api/health";
+  }
 
   // File serving endpoint: GET /api/files/:fileId
   if (url.startsWith("/api/files/") && (req.method === "GET" || req.method === "HEAD")) {
@@ -193,7 +210,7 @@ export async function handleApiRequest(req: IncomingMessage, res: ServerResponse
       }
 
       const stats = fs.statSync(targetFilePath);
-      const isDownload = fullUrl.includes("download=1");
+      const isDownload = rawUrl.includes("download=1");
 
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Content-Type", contentType);

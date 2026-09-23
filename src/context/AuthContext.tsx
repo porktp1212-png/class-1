@@ -351,12 +351,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   ) => {
     setLoading(true);
     try {
+      const cleanEmail = email.trim().toLowerCase();
+      if (cleanEmail) {
+        const existing = await getUserByEmailOrStudentId(cleanEmail);
+        if (existing) {
+          setCurrentUser(existing);
+          localStorage.setItem('eduvibe_current_user', JSON.stringify(existing));
+          return;
+        }
+      }
+
       const generatedId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const cleanName = name.trim() || (role === 'teacher' ? 'ครูผู้สอน' : 'นักเรียน');
-      const cleanEmail = email.trim().toLowerCase() || `${generatedId}@school.ac.th`;
+      const emailToUse = cleanEmail || `${generatedId}@school.ac.th`;
       const newProfile: UserProfile = {
         id: generatedId,
-        email: cleanEmail,
+        email: emailToUse,
         name: cleanName,
         role,
         grade: grade?.trim() || (role === 'student' ? 'ม.3/1' : undefined),

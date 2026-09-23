@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCredential,
   signOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -15,6 +16,7 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 export enum OperationType {
   CREATE = 'create',
@@ -96,8 +98,71 @@ export async function loginWithGoogle() {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error) {
-    console.error('Google Sign In Error:', error);
+  } catch (error: any) {
+    console.warn('Firebase popup sign-in note:', error?.code || error?.message);
+
+    // If user closed the popup on purpose, rethrow immediately
+    if (error?.code === 'auth/popup-closed-by-user' || error?.code === 'auth/cancelled-popup-request') {
+      throw error;
+    }
+
+    // Try Google Identity Services (GIS) fallback if available in browser
+    if (
+      typeof window !== 'undefined' &&
+      (window as any).google?.accounts?.id &&
+      (firebaseConfig as any).oAuthClientId
+    ) {
+      try {
+        const gisResult = await new Promise<any>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('GIS timeout')), 8000);
+          try {
+            (window as any).google.accounts.id.initialize({
+              client_id: (firebaseConfig as any).oAuthClientId,
+              auto_select: false,
+              callback: async (response: any) => {
+                clearTimeout(timeout);
+                try {
+                  const credential = GoogleAuthProvider.credential(response.credential);
+                  const credResult = await signInWithCredential(auth, credential);
+                  resolve(credResult.user);
+                } catch {
+                  try {
+                    const base64Url = response.credential.split('.')[1];
+                    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+                    const jsonPayload = decodeURIComponent(
+                      atob(base64)
+                        .split('')
+                        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                        .join('')
+                    );
+                    const payload = JSON.parse(jsonPayload);
+                    resolve({
+                      uid: `google_${payload.sub}`,
+                      email: payload.email,
+                      displayName: payload.name,
+                      photoURL: payload.picture,
+                    });
+                  } catch (jwtErr) {
+                    reject(jwtErr);
+                  }
+                }
+              },
+            });
+            (window as any).google.accounts.id.prompt();
+          } catch (initErr) {
+            clearTimeout(timeout);
+            reject(initErr);
+          }
+        });
+
+        if (gisResult) {
+          return gisResult;
+        }
+      } catch (gisError) {
+        console.warn('GIS fallback skipped or timed out:', gisError);
+      }
+    }
+
     throw error;
   }
 }

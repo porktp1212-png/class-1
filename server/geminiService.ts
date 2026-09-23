@@ -1,6 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
+import fs from "fs";
+import path from "path";
 
-function withTimeout<T>(promise: Promise<T>, ms = 18000): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms = 25000): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -25,7 +27,48 @@ function getGenAIClient() {
 }
 
 // Supported models to rotate if primary experiences temporary high demand (503) or rate limits (429)
-const CANDIDATE_MODELS = ["gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+const CANDIDATE_MODELS = [
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+  "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
+];
+
+function extractJson(text: string): any {
+  if (!text) return null;
+  // 1. Direct parse
+  try {
+    return JSON.parse(text.trim());
+  } catch {}
+
+  // 2. Markdown fence ```json ... ```
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch && codeBlockMatch[1]) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  // 3. Find outer object { ... }
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(text.substring(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  // 4. Find outer array [ ... ]
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    try {
+      return JSON.parse(text.substring(firstBracket, lastBracket + 1));
+    } catch {}
+  }
+
+  return null;
+}
 
 async function callGeminiWithFallback(
   ai: GoogleGenAI,
@@ -33,7 +76,7 @@ async function callGeminiWithFallback(
     contents: any;
     config?: any;
   },
-  timeoutMs = 18000
+  timeoutMs = 12000
 ): Promise<string | null> {
   for (let i = 0; i < CANDIDATE_MODELS.length; i++) {
     const model = CANDIDATE_MODELS[i];
@@ -58,15 +101,16 @@ async function callGeminiWithFallback(
         errMsg.includes("high demand") ||
         errMsg.includes("UNAVAILABLE") ||
         errMsg.includes("429") ||
-        errMsg.includes("RESOURCE_EXHAUSTED");
+        errMsg.includes("RESOURCE_EXHAUSTED") ||
+        errMsg.includes("404") ||
+        errMsg.includes("not found");
 
-      // If this model is experiencing high demand and another candidate is available, switch smoothly
+      // Switch to next candidate model smoothly
       if (isTemporaryDemand && i < CANDIDATE_MODELS.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 350));
+        await new Promise((resolve) => setTimeout(resolve, 300));
         continue;
       }
 
-      // Final model failed or non-recoverable error; break gracefully
       break;
     }
   }
@@ -129,12 +173,12 @@ ${params.lessonContent ? `- เนื้อหาบทเรียนอ้า�
             },
           },
         },
-        18000
+        25000
       );
 
       if (textResult) {
-        const parsed = JSON.parse(textResult);
-        if (Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+        const parsed = extractJson(textResult);
+        if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
           return parsed;
         }
       }
@@ -190,9 +234,15 @@ export async function evaluateSubmissionAI(params: {
   if (ai) {
     const rubricsText = rubrics.map((r, i) => `${i + 1}. เกณฑ์ "${r.title}" (คะแนนเต็ม ${r.maxScore} คะแนน)`).join('\n');
 
-    const fileListText = Array.isArray(params.files) && params.files.length > 0
-      ? params.files.map((f, i) => `  ${i + 1}. ${f.name} (${f.type || 'ไฟล์แนบ'})`).join('\n')
-      : (params.fileName ? `  - ${params.fileName} (${params.fileType || 'ไฟล์แนบ'})` : '');
+    const allFiles = Array.isArray(params.files) && params.files.length > 0
+      ? params.files
+      : (params.fileName || params.fileData || params.fileType)
+      ? [{ name: params.fileName || 'ไฟล์แนบ', type: params.fileType || '', data: params.fileData }]
+      : [];
+
+    const fileListText = allFiles.length > 0
+      ? allFiles.map((f, i) => `  ${i + 1}. ${f.name} (${f.type || 'ไฟล์แนบ'})`).join('\n')
+      : '';
 
     const promptText = `คุณคือผู้ช่วยครูตรวจการบ้านและชิ้นงานของนักเรียน (AI Teaching Assistant)
 โปรดช่วยครูตรวจประเมินผลงานของนักเรียนตามเกณฑ์รูบิกสกอร์ (Rubric Scoring Criteria) ที่ครูกำหนดไว้ดังต่อไปนี้:
@@ -219,30 +269,52 @@ ${params.studentSubmission || '(นักเรียนไม่ได้พิ
 
     const contents: any[] = [];
 
-    // If student attached image files, pass inline base64 images to Gemini
-    if (Array.isArray(params.files) && params.files.length > 0) {
-      for (const f of params.files) {
-        if (f.data && f.data.startsWith("data:image/")) {
+    // Process attached files (images / PDFs / text)
+    const uploadsDir = path.join(process.cwd(), "uploads");
+    for (const f of allFiles) {
+      try {
+        let mime = f.type || "";
+        let base64Data = "";
+
+        if (f.data && f.data.startsWith("data:")) {
           const match = f.data.match(/^data:([^;]+);base64,(.+)$/);
           if (match) {
-            contents.push({
-              inlineData: {
-                mimeType: match[1],
-                data: match[2],
-              },
-            });
+            mime = match[1];
+            base64Data = match[2];
+          }
+        } else if (f.url && f.url.startsWith("/api/files/")) {
+          const fileId = f.url.replace(/^\/api\/files\/?/, "").split("/")[0].split("?")[0];
+          if (fs.existsSync(uploadsDir)) {
+            const filesOnDisk = fs.readdirSync(uploadsDir);
+            const found = filesOnDisk.find((name) => name.startsWith(fileId));
+            if (found) {
+              const fullPath = path.join(uploadsDir, found);
+              const ext = path.extname(found).toLowerCase();
+              const buffer = fs.readFileSync(fullPath);
+              if ([".jpg", ".jpeg", ".png", ".webp", ".gif"].includes(ext)) {
+                mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+                base64Data = buffer.toString("base64");
+              } else if (ext === ".pdf") {
+                mime = "application/pdf";
+                base64Data = buffer.toString("base64");
+              } else if ([".txt", ".md", ".csv", ".json", ".html", ".js", ".ts", ".py"].includes(ext)) {
+                const textContent = buffer.toString("utf-8").slice(0, 10000);
+                contents.push(`[เนื้อหาไฟล์แนบ ${f.name}]:\n${textContent}`);
+              }
+            }
           }
         }
-      }
-    } else if (params.fileData && params.fileData.startsWith("data:image/")) {
-      const match = params.fileData.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) {
-        contents.push({
-          inlineData: {
-            mimeType: match[1],
-            data: match[2],
-          },
-        });
+
+        if (base64Data && (mime.startsWith("image/") || mime === "application/pdf")) {
+          contents.push({
+            inlineData: {
+              mimeType: mime,
+              data: base64Data,
+            },
+          });
+        }
+      } catch (fileErr) {
+        console.warn("Could not process attached file for AI:", fileErr);
       }
     }
 
@@ -287,24 +359,24 @@ ${params.studentSubmission || '(นักเรียนไม่ได้พิ
             },
           },
         },
-        20000
+        28000
       );
 
       if (textResult) {
-        const parsed = JSON.parse(textResult);
-        if (parsed.suggestedScore !== undefined) {
+        const parsed = extractJson(textResult);
+        if (parsed && typeof parsed.suggestedScore === "number") {
           return parsed;
         }
       }
-    } catch {
-      // Handled by structured fallback below
+    } catch (evalErr) {
+      console.warn("Gemini evaluation error, using structured fallback:", evalErr);
     }
   }
 
   // Graceful fallback if models busy or key not configured
   const rubricScores = rubrics.map((r) => ({
     title: r.title,
-    score: Math.round(r.maxScore * 0.8 * 10) / 10,
+    score: Math.round(r.maxScore * 0.85 * 10) / 10,
     maxScore: r.maxScore,
     comment: `ผลงานสอดคล้องตามเกณฑ์ ${r.title} อย่างเหมาะสม`,
   }));
@@ -380,12 +452,12 @@ ${params.recentNotes ? `- หมายเหตุเพิ่มเติม: $
             },
           },
         },
-        18000
+        25000
       );
 
       if (textResult) {
-        const parsed = JSON.parse(textResult);
-        if (parsed.skillsRadar) {
+        const parsed = extractJson(textResult);
+        if (parsed && parsed.skillsRadar) {
           return parsed;
         }
       }
